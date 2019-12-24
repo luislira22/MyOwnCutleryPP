@@ -92,7 +92,7 @@ encomendas_cliente(clD, [e(pA, 2, 180), e(pE, 3, 500), e(pD, 4, 700)]).
 :- (dynamic operacoes/1).
 :- (dynamic encomendas/1).
 :- (dynamic linha_makespan/2).
-:- dynamic linha_tarefas/2.
+:- (dynamic linha_tarefas/2).
 
 
 cria_op_enc:-
@@ -395,6 +395,7 @@ soma_tempos_atraso([Id|List],TempoAtual,TempoAtraso,Result):-!,
 :-dynamic n_populacoes_estavel/1.
 :-dynamic linha_em_uso/1.
 :-dynamic linha_solucao/2.
+:-dynamic tarefas_linha_em_uso/1.
 
 
 gera_production_planning(NGeracoes,Tpopulacao,PCP,PMP):-
@@ -406,7 +407,7 @@ gera_production_planning(NGeracoes,Tpopulacao,PCP,PMP):-
     PM is PMP / 100,
     (retract(prob_cruzamento(_));true),asserta(prob_cruzamento(PC)),
     (retract(prob_mutacao(_));true), asserta(prob_mutacao(PM)),
-	findall(L,linha_tarefas(L,_),LL),
+	findall(L,linha_tarefas(L,_),LL),!,
 	gera_production_planning(LL),
 	findall(linha_solucao(L,SOL),linha_solucao(L,SOL),LLS),
 	write(LLS).
@@ -414,11 +415,12 @@ gera_production_planning(NGeracoes,Tpopulacao,PCP,PMP):-
 gera_production_planning([]):- !.
 
 gera_production_planning([L|T]):-
-    gera_production_planning_linha(L),
+    gera_production_planning_linha(L),!,
     gera_production_planning(T).
 
 gera_production_planning_linha(L):-
     (retract(linha_em_uso(_));true), asserta(linha_em_uso(L)),
+	(retract(tarefas_linha_em_uso(_));true),linha_tarefas(L,LT),length(LT,NT),asserta(tarefas_linha_em_uso(NT)),
     gera_populacao(Pop,L),
     write('linha='),write(L),nl,
 	write('Pop='),write(Pop),nl,
@@ -430,8 +432,7 @@ gera_production_planning_linha(L):-
 
 solucao_heuristicas_repetidas(H1,H2,NH2):-
 	(compare_list(H1,H2),!,
-	gerar_pontos_cruzamento(P1,P2),
-	cruzar(H1,H2,P1,P2,NH2))
+	mutacao1(H2,NH2))
 	;
 	(NH2 = H2).
 
@@ -522,23 +523,21 @@ gera_geracao_base(Pop,PopFinal):-
 	ordena_populacao(NPopAv,NPopOrd),
 	nova_geracao(Pop,NPopOrd,PopFinal).
 
-escreve_media_populacao(Pop):-escreve_media_populacao(Pop,0,0).
-
-escreve_media_populacao([],N,Soma):-
-	Media is Soma / N,write('Media de valores da populacao final : '),write(Media),nl.
-escreve_media_populacao([_*V|T],N,Soma):-
-	NN is N + 1,
-	NSoma is Soma + V,
-	escreve_media_populacao(T,NN,NSoma).
-
-gera_geracao(G,G,[H|T],L):-!,
-	write('Geracao '), write(G), write(':'), nl, write([H|T]), nl,
+gera_geracao(N,_,[S*0|T],L):-!,
+	H = S*0,
+	write("soluçao atingiu o menor valor possivel!"),nl,
+	write('Geracao '), write(N), write(':'), nl, write([H|T]), nl,
     write('Melhor Solucao: '),write(H),nl,
-    assertz(linha_solucao(L,H)),
-	escreve_media_populacao([H|T]).
+    assertz(linha_solucao(L,S)).
+
+gera_geracao(G,G,[S*V|T],L):-!,
+	H = S*V,
+	write('Geracao '), write(G), write(':'), nl, write([S*V|T]), nl,
+    write('Melhor Solucao: '),write(H),nl,
+    assertz(linha_solucao(L,S)).
 
 gera_geracao(N,G,Pop,L):-
-	write('Geracao '), write(N), write(':'), nl, write(Pop), nl,
+	%write('Geracao '), write(N), write(':'), nl, write(Pop), nl,
 	gera_geracao_base(Pop,PopFinal),
 	N1 is N+1,
 	gera_geracao(N1,G,PopFinal,L).
@@ -636,7 +635,7 @@ gerar_pontos_cruzamento(P1,P2):-
 	gerar_pontos_cruzamento1(P1,P2).
 
 gerar_pontos_cruzamento1(P1,P2):-
-	tarefas(N),
+	tarefas_linha_em_uso(N),
 	NTemp is N+1,
 	random(1,NTemp,P11),
 	random(1,NTemp,P21),
@@ -684,7 +683,7 @@ sublista1([_|R1],N1,N2,[h|R2]):-
 	sublista1(R1,N3,N4,R2).
 
 rotate_right(L,K,L1):-
-	tarefas(N),
+	tarefas_linha_em_uso(N),
 	T is N - K,
 	rr(T,L,L1).
 
@@ -707,7 +706,7 @@ elimina([_|R1],L,R2):-
 
 insere([],L,_,L):-!.
 insere([X|R],L,N,L2):-
-	tarefas(T),
+	tarefas_linha_em_uso(T),
 	((N>T,!,N1 is N mod T);N1 = N),
 	insere1(X,N1,L,L1),
 	N2 is N + 1,
@@ -721,7 +720,7 @@ insere1(X,N,[Y|L],[Y|L1]):-
 
 cruzar(Ind1,Ind2,P1,P2,NInd11):-
 	sublista(Ind1,P1,P2,Sub1),
-	tarefas(NumT),
+	tarefas_linha_em_uso(NumT),
 	R is NumT-P2,
 	rotate_right(Ind2,R,Ind21),
 	elimina(Ind21,Sub1,Sub2),
