@@ -4,17 +4,6 @@
 linhas([lA, lB]).
 
 
-
-
-% Maquinas
-maquinas([ma, mb, mc, md, me, mf, mg, mh, mi, mj]).
-
-
-
-% Ferramentas
-ferramentas([fa, fb, fc, fd, fe, ff, fg, fh, fi, fj]).
-
-
 % Maquinas que constituem as Linhas
 linha_maquinas(lA, [ma, mb, mc, md, me]).
 linha_maquinas(lB, [mf, mg, mh, mi, mj]).
@@ -45,14 +34,17 @@ operacao_maquina(opt4, mi, fd, 1, 1).
 operacao_maquina(opt5, me, fe, 2, 3).
 operacao_maquina(opt5, mj, fe, 2, 3).
 operacao_maquina(opt6, mb, ff, 1, 4).
+operacao_maquina(opt6, mg, ff, 1, 4).
 operacao_maquina(opt7, md, fg, 2, 5).
+operacao_maquina(opt7, mi, fg, 2, 5).
 operacao_maquina(opt8, ma, fh, 1, 6).
+operacao_maquina(opt8, mf, fh, 1, 6).
 operacao_maquina(opt9, me, fi, 1, 7).
+operacao_maquina(opt9, mj, fi, 1, 7).
 operacao_maquina(opt10, mc, fj, 20, 2).
 
 
 % PRODUTOS
-produtos([pA, pB, pC, pD, pE, pF]).
 
 operacoes_produto(pA, [opt1, opt2, opt3, opt4, opt5]).
 operacoes_produto(pB, [opt1, opt6, opt3, opt4, opt5]).
@@ -62,13 +54,10 @@ operacoes_produto(pE, [opt1, opt2, opt3, opt4, opt9]).
 operacoes_produto(pF, [opt1, opt2, opt10, opt4, opt5]).
 
 
-
 % ENCOMENDAS
 
-%Clientes
-clientes([clA, clB, clC, clD]).
 
-
+%quanto maior a o valor maior a prioridade
 % prioridades dos clientes
 prioridade_cliente(clA, 3).
 prioridade_cliente(clB, 1).
@@ -81,24 +70,30 @@ prioridade_cliente(clD, 4).
 % termos e(<produto>,<n.unidades>,<tempo_conclusao>)
 encomendas_cliente(clA, [e(pA, 4, 50), e(pB, 4, 70), e(pD, 6, 100)]).
 encomendas_cliente(clB, [e(pC, 3, 30), e(pD, 5, 200), e(pA, 1, 198)]).
-encomendas_cliente(clC, [e(pE, 4, 60)]).
-encomendas_cliente(clD, [e(pA, 2, 180), e(pE, 3, 500), e(pD, 4, 700)]).
+%encomendas_cliente(clC, [e(pE, 4, 60), e(pD, 4, 60),e(pA, 4, 60)]).
+%encomendas_cliente(clD, [e(pA, 2, 180), e(pE, 3, 500), e(pD, 4, 700)]).
 
+%-------------------------------------HTTP Server-------------------------------------%
+:- use_module(library(http/thread_httpd)).
+:- use_module(library(http/http_dispatch)).
 
-% cria_op_enc - fizeram-se correcoes face a versao anterior
-:- (dynamic operacoes_atrib_maq/2).
-:- (dynamic classif_operacoes/2).
+server(Port) :-
+        http_server(http_dispatch, [port(Port)]).
+
+:- http_handler(/, say_hi, []).
+
+say_hi(_Request) :-
+        format('Content-type: text/plain~n~n'),
+        format('Hello World!~n').
+
+%-------------------------------------Cria_op_enc-------------------------------------%
 :- (dynamic op_prod_client/6).
-:- (dynamic operacoes/1).
 :- (dynamic encomendas/1).
 :- (dynamic linha_makespan/2).
 :- (dynamic linha_tarefas/2).
 
 
 cria_op_enc:-
-retractall(operacoes(_)),
-retractall(operacoes_atrib_maq(_,_)),
-retractall(classif_operacoes(_,_)),
 retractall(op_prod_client(_,_,_,_,_,_)),
 retractall(tarefas(_)),
 retractall(tarefa(_,_,_,_)),
@@ -120,51 +115,13 @@ assertz(linhas_em_uso([])),
 		findall((L,LTL),linha_tarefas(L,LTL),LLT),write(LLT),nl,
         %cria operaçoes atribuindo cada uma das tarefas á linha correspondente
 		findall(EID,encomenda(EID,_,_,_,_),LE),
-		cria_ops(LE,0),
-        findall(Op,classif_operacoes(Op,_),LOp),
-		asserta(operacoes(LOp)),
-		maquinas(LM),
-        findall(_,
-		(member(M,LM),
-		findall(Opx,op_prod_client(Opx,M,_,_,_,_),LOpx),
-		assertz(operacoes_atrib_maq(M,LOpx))),_).
+		cria_ops(LE,0).
 
 
-balanceamento_linhas():-
-    findall(tld(TID,Tconc,Makespan,LLD),(
-                                    tarefa(TID,Makespan,Tconc,_),
-                                    tarefa_encomenda(TID,EID),
-                                    encomenda(EID,_,Prod,_,_),
-                                    verifica_linhas_disponiveis(Prod,LLD)
-           ),LTLD),     
-    sort(2,@<,LTLD,LTLDO),
-    atribui_tarefas_linha(LTLDO).
+inicializa_linhas():- linhas(LL),inicializa_linhas(LL).
 
-atribui_tarefas_linha([]):- !.
-
-atribui_tarefas_linha([tld(TID,_,Makespan,LLD)|T]):-
-    findall(lms(L,MS),(linha_makespan(L,MS),member(L,LLD)),LLMS),
-    sort(2,@<,LLMS,LLMSO),
-    atribui_tarefa_linha(LLMSO,tld(TID,_,Makespan,LLD)),
-    atribui_tarefas_linha(T).
-
-atribui_tarefa_linha([lms(L,MakespanActual)|_],tld(TID,_,Makespan,_)):-
-    %novo makespan
-    MakespanNovo is MakespanActual + Makespan,
-    retract(linha_makespan(L,_)),
-	assertz(linha_makespan(L,MakespanNovo)),
-	
-	(
-		(linha_tarefas(L,LT),!,
-			retract(linha_tarefas(L,_)),
-			append([TID],LT,NLT),
-			assertz(linha_tarefas(L,NLT))
-		)
-		;
-		(assertz(linha_tarefas(L,[TID])))
-	).
-
-        
+inicializa_linhas([]):-!.
+inicializa_linhas([L|T]):- assertz(linha_makespan(L,0)),inicializa_linhas(T).
 
 cria_ops([],_).
 cria_ops([EID|LT],N):-
@@ -184,7 +141,6 @@ cria_ops_prod_cliente([Opt|LOpt],EID,N,Nf):-
 cria_ops_prod_cliente2(Opt,EID,N,Ni):-
 			Ni is N+1,
 			atomic_concat(op,Ni,Op),
-			assertz(classif_operacoes(Op,Opt)),
             %maquinas linha
             tarefa_encomenda(TID,EID),
             encontra_linha(TID,L),
@@ -192,8 +148,46 @@ cria_ops_prod_cliente2(Opt,EID,N,Ni):-
             %Maquina tem de estar na linha
             operacao_maquina(Opt,M,F,Tsetup,Texec),
             member(M,LM),!,
+			write(Op),write(" ---> "),write(M),write(","),write(F),write(","),write(EID),write(",S"),write(Tsetup),write(",E"),write(Texec),nl,
 	assertz(op_prod_client(Op,M,F,EID,Tsetup,Texec)).
 
+
+
+%-------------------------------------Balanceamento de linhas-------------------------------------%
+
+balanceamento_linhas():-
+    findall(tld(TID,Tconc,Makespan,LLD),(
+                                    tarefa(TID,Makespan,Tconc,_),
+                                    tarefa_encomenda(TID,EID),
+                                    encomenda(EID,_,Prod,_,_),
+                                    verifica_linhas_disponiveis(Prod,LLD)
+           ),LTLD),    
+    sort(2,@=<,LTLD,LTLDO),
+    atribui_tarefas_linha(LTLDO).
+
+atribui_tarefas_linha([]):- !.
+
+atribui_tarefas_linha([tld(TID,_,Makespan,LLD)|T]):-
+    findall(lms(L,MS),(linha_makespan(L,MS),member(L,LLD)),LLMS),
+    sort(2,@=<,LLMS,LLMSO),
+    atribui_tarefa_linha(LLMSO,tld(TID,_,Makespan,LLD)),
+    atribui_tarefas_linha(T).
+
+atribui_tarefa_linha([lms(L,MakespanActual)|_],tld(TID,_,Makespan,_)):-
+    %novo makespan
+    MakespanNovo is MakespanActual + Makespan,
+    retract(linha_makespan(L,_)),
+	assertz(linha_makespan(L,MakespanNovo)),
+	
+	(
+		(linha_tarefas(L,LT),!,
+			retract(linha_tarefas(L,_)),
+			append([TID],LT,NLT),
+			assertz(linha_tarefas(L,NLT))
+		)
+		;
+		(assertz(linha_tarefas(L,[TID])))
+	).
 
 encontra_linha(TID,L):- linha_tarefas(L,LT),member(TID,LT),!.
 
@@ -209,89 +203,214 @@ valida_maquinas_operacoes([M|T],[Opt|T2]):-
     member(M,LM),
     valida_maquinas_operacoes(T,T2).
 
-inicializa_linhas():- linhas(LL),inicializa_linhas(LL).
-
-inicializa_linhas([]):-!.
-inicializa_linhas([L|T]):- assertz(linha_makespan(L,0)),inicializa_linhas(T).
-
-
 %-------------------------------------Agendamento de maquinas-------------------------------------%
 
 :-dynamic agenda_maquina/2.%(maquina,lista de agendamentos)
-:-dynamic machine_setup_tool/2. %(maquina, ferramenta)
+:-dynamic machine_tool/2. %(maquina, ferramenta)
+:-dynamic deslizamento_total/1. %deslizemento total
 %Agendamento de setup a(tempo_inicial,tempo_final,"setup",ferramenta_em_uso)
-%Agendamento de execucao  a(tempo_inicial,tempo_final,"exec",Id_encomenda)
+%Agendamento de execucao  a(tempo_inicial,tempo_final,"exec",op(Operacao, id da encomenda))
 
 
 agenda_maquinas:- 
-	tarefas_a_agendar(TA),
-	agenda_maquinas_tarefas(TA).
-	
-agenda_maquinas_tarefas([]):-!.
-agenda_maquinas_tarefas([TID|T]):-
+	retractall(agenda_maquina(_,_)),
+	retractall(machine_tool(_,_)),
+	asserta(deslizamento_total(0)),
+	findall(T,(linha_solucao(_,T),agenda_maquinas_tarefas(0,T)),_),
+	escreve_agendamentos(),
+	escreve_deslizamento_total(),!.
+
+escreve_agendamentos:-
+	findall((L,LM),(linha_maquinas(L,LM),write("linha "), write(L),nl,nl,escreve_agendamentos_maquinas(LM)),_).
+
+escreve_agendamentos_maquinas([]):-!.
+escreve_agendamentos_maquinas([M|T]):-
+	agenda_maquina(M,LA),write(M),write(": "),nl,escreve_agendamentos_maquina(LA),
+	escreve_agendamentos_maquinas(T).
+
+escreve_agendamentos_maquina([]):-!.
+escreve_agendamentos_maquina([a(TIS,TFS,"setup",F),a(TIE,TFE,"exec",Op)|T]):-!,
+	write("setup("),write(TIS),write(" ---> "),write(TFS),write(" with "),write(F),write(") ... "),
+	write("execution("),write(TIE),write("---> "),write(TFE),write(" in "),write(Op),write(")"),nl,
+	escreve_agendamentos_maquina(T).
+escreve_agendamentos_maquina([a(TIE,TFE,"exec",Op)|T]):- 
+	write("execution("),write(TIE),write(" ---> "),write(TFE),write(" in "),write(Op),write(")"),nl,
+	escreve_agendamentos_maquina(T).
+
+escreve_deslizamento_total:-
+	deslizamento_total(DT),write("deslizamento total: "),write(DT),nl.
+
+agenda_maquinas_tarefas(_,[]):-!.
+agenda_maquinas_tarefas(TempoActual,[TID|T]):-
 	%encomenda através de tarefa
 	tarefa_encomenda(TID,EID),
 	%operacoes associadas a encomenda
-	findall(op(M,F,Tsetup,Texec,EID),op_prod_client(_,M,F,EID,Tsetup,Texec),LOPS),
-	agenda_maquinas_operacoes(LOPS),
-	agenda_maquinas_tarefas(T).
-
-lista_operacoes_tempo_atribuido([(M,F,Tsetup,Texec,EID)|[]],[]):-!,
-	%tarefa
-	tarefa_encomenda(TID,EID),
-	tarefa(TID,MS,_,_),.
-
-lista_operacoes_tempo_atribuido([(M,F,Tsetup,Texec,EID)|T],LOPS):-!,
-	lista_operacoes_tempo_atribuido(T,LOPSTA),.
-
-agenda_maquinas_operacoes([]):-!.
-agenda_maquinas_operacoes([op(M,F,Tsetup,Texec,EID)|T]):-
-	(
-		(
-			agenda_maquina(M,LA),!
-		)
-		;
-		(
-			Setup = a(0,Tsetup,"setup",F),
-			Exec = a(Tsetup,Tsetup+Texec,"exec",EID),
-			assertz(machine_setup_tool(M,F)),
-			assertz(agenda_maquina(M,[Setup,Exec]))
-		)
-
-	),agenda_maquinas_operacoes(T).
-
-add_setup(M,F,Tsetup):-
-	(
-		machine_setup_tool(M,F)
-		;
-		(
-			retract(machine_setup_tool(M,_)),
-			assertz(machine_setup_tool(M,F))
-			add_elemento_agenda_maquina(M,())
-		)
-	).
-
-
-
-add_elemento_agenda_maquina(M,E):-
-	agenda_maquina(M,LA),
-	append(LA,E,NLA),
-	retract(agenda_maquina(M,_)),
-	assertz(M,NLA).
-
-add_elemento
-
-%agenda_maquinas([Tarefa|Tail]):-
-    %vai buscar atributos de tarefa
-    %atributos_tarefa(Tarefa,Produto,Cliente,Quantidade),
-    %.
-
-tarefas_a_agendar(TA):-
-	findall(LTS,linha_solucao(_,LTS),LLTS),
-	junta_listas(LLTS,TA).
+	findall(op(Op,M,F,Tsetup,Texec,EID),op_prod_client(Op,M,F,EID,Tsetup,Texec),LOPS),
+	%maquinas associadas a encomenda
+	findall(M,op_prod_client(_,M,_,EID,_,_),LM),
+	%descobre operacao que marca a cadencia
+	operacao_cadencia(LOPS,OPCA),
+	lista_operacoes_tempo_atribuido(LOPS,LOPSTA,TID,OPCA),!,
+	%agenda uma tarefa nova
+	agenda_maquinas_operacoes(TempoActual,LOPSTA),!,
+	%desliza a tarefa agendada
+	desliza_agendamentos(LM),!,
+	%encontra makespan de tarefa
+	tarefa(TID,MS,_,_),
+	%calcula novo tempo actual
+	NTempoActual is TempoActual + MS,
+	agenda_maquinas_tarefas(NTempoActual,T).
 
 junta_listas([],[]):-!.
 junta_listas([H1|T1],L):- junta_listas(T1,L1),append(H1,L1,L).
+
+%operacoes com tempo atribuido 
+%Setup ---> opta(M,TI,TF,"setup",F)
+%Exec ---> opta(M,TI,TF,"exec",op(op,EID))
+operacao_cadencia(LOPS,OPCA):-sort(5,@>=,LOPS,[op(OPCA,_,_,_,_,_)|_]).
+
+lista_operacoes_tempo_atribuido(LOPS,LOPSTA,TID,OPCA):-
+%começa do fim para o inicio
+reverse(LOPS,LOPSR),
+%tempo de fim
+tarefa(TID,MS,_,_),
+lista_operacoes_tempo_atribuido(LOPSR,LOPSTA,_,MS,OPCA).
+
+lista_operacoes_tempo_atribuido([],[],_,_,_):-!.
+
+lista_operacoes_tempo_atribuido([op(OPCA,M,F,Tsetup,Texec,EID)|T],LOPSTA,TempoIActualSuperior,TempoFActual,OPCA):-!,
+	%vai buscar quantidade a encomenda
+	encomenda(EID,_,_,Qt,_),
+	%determina tempo inicial actual
+	TempoIActual is TempoFActual - Qt * Texec,
+	TFexec is TempoFActual,
+	TIexec is TempoIActual,
+	TFsetup is TIexec,
+	TIsetup is TFsetup-Tsetup,
+	%determina tempo final actual
+	NTempoFActual is TempoFActual - Texec,
+	lista_operacoes_tempo_atribuido(T,LOPSTA1,TempoIActual,NTempoFActual,OPCA),!,
+	%backtracking!!! :)
+	%determina tempoIActualSuperior
+	TempoIActualSuperior is TempoIActual + Texec,
+	%cria variaveis para serem introduzidas na lista
+	OPTAS = opta(M,TIsetup,TFsetup,"setup",F),
+	OPTAE = opta(M,TIexec,TFexec,"exec",op(OPCA,EID)),
+	%introduz nas listas
+	append(LOPSTA1,[OPTAS,OPTAE],LOPSTA).
+
+lista_operacoes_tempo_atribuido([op(Op,M,F,Tsetup,Texec,EID)|T],LOPSTA,TempoIActual,TempoFActual,OPCA):-
+	TFexec is TempoFActual,
+	%encontra novo tempo actual
+	NTempoFActual is TempoFActual - Texec,
+	(
+		(nonvar(TempoIActual),!,NTempoIActual is TempoIActual - Texec)
+		;
+		true
+	),
+	lista_operacoes_tempo_atribuido(T,LOPSTA1,NTempoIActual,NTempoFActual,OPCA),!,
+	%backtracking!!! :)
+	(
+		(var(TempoIActual),!,TempoIActual is NTempoIActual + Texec)
+		;
+		true
+	),
+	TIexec is NTempoIActual,
+	TFsetup is TIexec,
+	TIsetup is TFsetup - Tsetup,
+	%cria variaveis para serem introduzidas na lista
+	OPTAS = opta(M,TIsetup,TFsetup,"setup",F),
+	OPTAE = opta(M,TIexec,TFexec,"exec",op(Op,EID)),
+	%introduz na lista
+	append(LOPSTA1,[OPTAS,OPTAE],LOPSTA). 
+	
+
+agenda_maquinas_operacoes(_,[]):-!.
+agenda_maquinas_operacoes(TempoActual,[opta(M,TI,TF,"setup",F)|T]):-
+	(
+		(
+			%se ja existir uma agenda para M
+			agenda_maquina(M,LA),!,
+			(
+				(
+					machine_tool(M,FA),
+					FA \= F,
+					%calculo de variaveis acumuladas
+					TIA is TI + TempoActual,
+					TFA is TF + TempoActual,
+					append(LA,[a(TIA,TFA,"setup",F)],NLA),
+					retract(agenda_maquina(M,_)),
+					assertz(agenda_maquina(M,NLA)),
+					retract(machine_tool(M,_)),
+					assertz(machine_tool(M,F))
+				)
+				;
+				true
+			)
+		)
+		;
+		(
+			%se ainda nao existir uma agenda para M
+			assertz(agenda_maquina(M,[a(TI,TF,"setup",F)])),
+			assertz(machine_tool(M,F))
+		)
+	),agenda_maquinas_operacoes(TempoActual,T).
+
+agenda_maquinas_operacoes(TempoActual,[opta(M,TI,TF,"exec",op(Op,EID))|T]):-
+	agenda_maquina(M,LA),
+	%calculo de variaveis acumuladas
+	TIA is TI + TempoActual,
+	TFA is TF + TempoActual,
+	append(LA,[a(TIA,TFA,"exec",op(Op,EID))],NLA),
+	retract(agenda_maquina(M,_)),
+	%asserta nova agenda da maquina
+	assertz(agenda_maquina(M,NLA)),
+	agenda_maquinas_operacoes(TempoActual,T).
+
+desliza_agendamentos(LM):-
+	calcula_deslizamento_maximo(LM,DM),
+	%acrescenta ao deslizamento total
+	deslizamento_total(DT),
+	retract(deslizamento_total(_)),
+	NDT is DT + DM,
+	asserta(deslizamento_total(NDT)),
+	desliza_agendamentos(LM,DM).
+
+desliza_agendamentos([],_):-!.
+desliza_agendamentos([M|T],DM):-
+	agenda_maquina(M,LA),
+	desliza_maquina(LA,DM,NLA),
+	retract(agenda_maquina(M,_)),
+	asserta(agenda_maquina(M,NLA)),
+	desliza_agendamentos(T,DM).
+
+desliza_maquina([a(TIE,TFE,"exec",Op)|[]],D,[a(NTIE,NTFE,"exec",Op)]):-!,
+	NTIE is TIE - D,
+	NTFE is TFE - D.
+desliza_maquina([a(TIS,TFS,"setup",F),a(TIE,TFE,"exec",Op)|[]],D,[a(NTIS,NTFS,"setup",F),a(NTIE,NTFE,"exec",Op)]):-!,
+	NTIE is TIE - D,
+	NTFE is TFE - D,
+	NTIS is TIS - D,
+	NTFS is TFS - D.
+
+desliza_maquina([A|T],D,[A|NLA]):- desliza_maquina(T,D,NLA).
+
+
+calcula_deslizamento_maximo([M|[]],D):-!,agenda_maquina(M,LA),reverse(LA,LAR),calcula_deslizamento(LAR,D).
+calcula_deslizamento_maximo([M|T],DM):-
+	calcula_deslizamento_maximo(T,DN),
+	agenda_maquina(M,LA),
+	reverse(LA,LAR),
+	calcula_deslizamento(LAR,D),
+	(
+		(DN=<D,!,DM is DN)
+		;
+		DM is D
+	).
+
+calcula_deslizamento([a(_,_,"exec",_),a(TI,_,"setup",_)],TI):-!.
+calcula_deslizamento([a(_,_,"exec",_),a(TI,_,"setup",_),a(_,TF,"exec",_)|_],TI - TF):-!.
+calcula_deslizamento([a(TI,_,"exec",_),a(_,TF,"exec",_)|_],TI - TF):-!.
 	
 
 %-------------------------------------Tarefas-------------------------------------%
@@ -318,7 +437,7 @@ cria_tarefa_encomenda(t(Cliente,Prod,Qt,TConc),N):-
 calcula_makespan(Prod,Qt,MakeSpan):-
 	cria_lista_operacoes_produto(Prod,LOpP),
 	soma_valores_setup(LOpP,Setup),
-	sort(1, @>, LOpP, LOpPO),
+	sort(1, @>=, LOpP, LOpPO),
 	soma_valores_makespan(LOpPO,Qt,MakeSpan,Setup).
 
 cria_lista_operacoes_produto(Prod,LOpP):-
@@ -354,51 +473,17 @@ soma_lista_valores([],0):-!.
 soma_lista_valores([(Texec,_)|T],Soma):-soma_lista_valores(T,Valor),Soma is Valor + Texec.
 
 calcula_penalizacao(Prioridade,Penalizacao):-Penalizacao is 0.9 + Prioridade / 10.
-%-------------------------------------Http server--------------------------%
-
-
 %-------------------------------------Heuristicas adaptadas a Tarefas--------------------------%
 
-:-dynamic melhor_solucao/1.
-
-%Calculo da melhor solucao
-
-% permuta/2 gera permutações de listas
-permuta([ ],[ ]).
-permuta(L,[X|L1]):-apaga1(X,L,Li),permuta(Li,L1).
-
-apaga1(X,[X|L],L).
-apaga1(X,[Y|L],[Y|L1]):-apaga1(X,L,L1).
-
-permuta_tempo(LP,Tempo):- findall(T,tarefa(T,_,_,_),LT),
-permuta(LT,LP),soma_tempos_atraso(LP,NTempo),
-melhor_solucao(Tempo),
-(
-	(NTempo<Tempo,retract(melhor_solucao(_)),asserta(melhor_solucao(NTempo)))
-).
-
-
-% melhor escalonamento com findall, gera todas as solucoes e escolhe melhor
-
-melhor_escalonamento():-
-				asserta(melhor_solucao(10000000)),
-				get_time(Ti),
-				findall(_,permuta_tempo(_,_),_),
-				melhor_solucao(Tempo),
-				write('melhor solucao : '),write(Tempo),nl,
-				get_time(Tf),Tcomp is Tf-Ti,
-				retractall(melhor_solucao(_)),
-				write('GERADO EM '),write(Tcomp),
-				write(' SEGUNDOS'),nl.
 
 
 % Earliest Due Date
 
 heuristica_MenorTempoAtraso_EDD(ListaTarefas,Resultlist,Result):-
 	findall(t(T,TP,TCP),(tarefa(T,TP,TC,P),member(T,ListaTarefas),TCP is TC * P),ListaTarefasDetalhadas),
-	sort(3,@<,ListaTarefasDetalhadas,ListaTarefasOrd),
+	sort(3,@=<,ListaTarefasDetalhadas,ListaTarefasOrd),
 	to_task_id(ListaTarefasOrd,Resultlist),
-	soma_tempos_atraso(Resultlist,Result),!.                                        
+	avalia(Resultlist,Result),!.                                        
 
 to_task_id([],[]):-!.
 to_task_id([t(ID,_,_)|Rest],ResultList):- to_task_id(Rest,ResultListTMP),append([ID],ResultListTMP,ResultList).
@@ -407,7 +492,7 @@ to_task_id([t(ID,_,_)|Rest],ResultList):- to_task_id(Rest,ResultListTMP),append(
 heuristica_MenorTempoAtraso_CR(ListaTarefas,ResultList,Result):- 
 	findall(t(T,TP,TCP),(tarefa(T,TP,TC,P),member(T,ListaTarefas),TCP is TC * P),ListaTarefasDetalhadas),
 	encontra_sequencia_cr(ListaTarefasDetalhadas,0,ResultList),
-	soma_tempos_atraso(ResultList,Result),!.
+	avalia(ResultList,Result),!.
 
 encontra_sequencia_cr([],_,[]):-!.
 encontra_sequencia_cr(ListaTarefas,TempoActual,ResultList):-
@@ -415,7 +500,7 @@ encontra_sequencia_cr(ListaTarefas,TempoActual,ResultList):-
 	soma_processamento_tarefas(ListaTarefas,TempoTotal),
 	calcula_cr(ListaTarefas,TempoTotal,TempoActual,ListaCr),
 	%organiza lista de critical Ratio de maneira a ter o elemento com melhor critical ratio
-	sort(2,@<,ListaCr,ListaCrOrd),
+	sort(2,@=<,ListaCr,ListaCrOrd),
 	get_head(ListaCrOrd,TarefaEscolhida,NTempoActual),
 	%remove tarefa da proxima lista a ser avaliada
 	remove_tarefa_escolhida(TarefaEscolhida,ListaTarefas,NListaTarefas),
@@ -452,54 +537,90 @@ soma_tempos_atraso([Id|List],TempoAtual,TempoAtraso,Result):-!,
 	((NTempoAtual-TempoConclusao)>0,!,NTempoAtraso is TempoAtraso + (NTempoAtual-TempoConclusao)*Peso;NTempoAtraso is TempoAtraso),
 	soma_tempos_atraso(List,NTempoAtual,NTempoAtraso,Result).
 
+%-------------------------------------Gera production planning-------------------------------------%
 
 
-%-------------------------------------Algoritmos Genericos-------------------------------------%
+:-dynamic linha_solucao/2.
+
+gera_production_planning:-
+%remove todas as solucoes
+retractall(linha_solucao(_,_)),
+findall((L,LT),linha_tarefas(L,LT),LLT),!,
+setup_gera(),
+gera_production_planning(LLT),!,
+findall(linha_solucao(L,SOL),linha_solucao(L,SOL),LLS),
+write(LLS).
 
 
+gera_production_planning([]):- !.
+
+gera_production_planning([(L,LT)|T]):-
+	write('linha='),write(L),nl,
+	((retract(linha_em_uso(_)),!);true), asserta(linha_em_uso(L)),
+	((retract(tarefas_linha_em_uso(_)),!);true),length(LT,NT),asserta(tarefas_linha_em_uso(NT)),
+	(
+		(NT >= 6,!,write("Algoritmo genetico"),nl,gera())
+		;
+		(write("Melhor escalonamento"),nl,melhor_escalonamento())
+	),gera_production_planning(T).
+
+%-------------------------------------Melhor Escalonamento-------------------------------------%
+
+:-dynamic melhor_tempo/1.
+
+%Calculo da melhor solucao
+
+% permuta/2 gera permutações de listas
+permuta([ ],[ ]).
+permuta(L,[X|L1]):-apaga1(X,L,Li),permuta(Li,L1).
+
+apaga1(X,[X|L],L).
+apaga1(X,[Y|L],[Y|L1]):-apaga1(X,L,L1).
+
+permuta_tempo(LP,Tempo):- 
+linha_em_uso(L),linha_tarefas(L,LT1),findall(T,(tarefa(T,_,_,_),member(T,LT1)),LT),
+permuta(LT,LP),avalia(LP,NTempo),
+melhor_tempo(Tempo),
+NTempo<Tempo,
+write(LP),write("*"),write(NTempo),nl,
+retract(melhor_tempo(_)),asserta(melhor_tempo(NTempo)),
+retractall(linha_solucao(L,_)),asserta(linha_solucao(L,LP)).
+
+
+% melhor escalonamento com findall, gera todas as solucoes e escolhe melhor
+
+melhor_escalonamento():-
+				assertz(melhor_tempo(100000000)),
+				findall(_,permuta_tempo(_,_),_),
+				linha_em_uso(L),linha_solucao(L,LT),melhor_tempo(Tempo),
+				write("Melhor Solucao: "),write(LT),write("*"),write(Tempo),nl,
+				retractall(melhor_tempo(_)).
+			
+
+%-------------------------------------Algoritmos Geneticos-------------------------------------%
+	
 :-dynamic geracoes/1.
 :-dynamic populacao/1.
 :-dynamic prob_cruzamento/1.
 :-dynamic prob_mutacao/1.
-:-dynamic tempo_geracao/1.
-:-dynamic peso_minimo_solucao/1.
-:-dynamic n_populacoes_estavel/1.
 :-dynamic linha_em_uso/1.
-:-dynamic linha_solucao/2.
 :-dynamic tarefas_linha_em_uso/1.
 
+setup_gera:-
+	((retract(geracoes(_)),!);true), asserta(geracoes(100)),
+    ((retract(populacao(_)),!);true), asserta(populacao(10)),
+	PC is 80 / 100,PM is 20 / 100,
+    ((retract(prob_cruzamento(_)),!);true),asserta(prob_cruzamento(PC)),
+    ((retract(prob_mutacao(_)),!);true), asserta(prob_mutacao(PM)).
 
-gera_production_planning(NGeracoes,Tpopulacao,PCP,PMP):-
-	%remove todas as solucoes
-	retractall(linha_solucao(_,_)),
-    (retract(geracoes(_));true), asserta(geracoes(NGeracoes)),
-    (retract(populacao(_));true), asserta(populacao(Tpopulacao)),
-    PC is PCP / 100,
-    PM is PMP / 100,
-    (retract(prob_cruzamento(_));true),asserta(prob_cruzamento(PC)),
-    (retract(prob_mutacao(_));true), asserta(prob_mutacao(PM)),
-	findall(L,linha_tarefas(L,_),LL),!,
-	gera_production_planning(LL),
-	findall(linha_solucao(L,SOL),linha_solucao(L,SOL),LLS),
-	write(LLS).
-
-gera_production_planning([]):- !.
-
-gera_production_planning([L|T]):-
-    gera_production_planning_linha(L),!,
-    gera_production_planning(T).
-
-gera_production_planning_linha(L):-
-    (retract(linha_em_uso(_));true), asserta(linha_em_uso(L)),
-	(retract(tarefas_linha_em_uso(_));true),linha_tarefas(L,LT),length(LT,NT),asserta(tarefas_linha_em_uso(NT)),
-	gera_populacao(Pop,L),
-    write('linha='),write(L),nl,
+gera():-
+	gera_populacao(Pop),!,
 	write('Pop='),write(Pop),nl,
 	avalia_populacao(Pop,PopAv),
 	write('PopAv='),write(PopAv),nl,
 	ordena_populacao(PopAv,PopOrd),
 	geracoes(NG),
-	gera_geracao(0,NG,PopOrd,L).
+	gera_geracao(0,NG,PopOrd).
 
 solucao_heuristicas_repetidas(H1,H2,NH2):-
 	((compare_list(H1,H2),!,
@@ -507,15 +628,14 @@ solucao_heuristicas_repetidas(H1,H2,NH2):-
 	;
 	(NH2 = H2)).
 
-gera_populacao(Pop,L):-
+gera_populacao(Pop):-
+	linha_em_uso(L),
 	%tamanho da populacao
 	populacao(TamPop),
     %tarefas para uma determinada linha
 	linha_tarefas(L,ListaTarefas),
 	%numero de tarefas
-	length(ListaTarefas,NumT),
-    %numero de tarefas
-	length(ListaTarefas,NumT),
+	length(ListaTarefas,NumT),!,
 	gera_populacao(TamPop,ListaTarefas,NumT,Pop).
 
 %gera_populacao(0,_,_,[]):-!.
@@ -594,24 +714,26 @@ gera_geracao_base(Pop,PopFinal):-
 	ordena_populacao(NPopAv,NPopOrd),
 	nova_geracao(Pop,NPopOrd,PopFinal).
 
-gera_geracao(N,_,[S*0|T],L):-!,
+gera_geracao(N,_,[S*0|T]):-!,
 	H = S*0,
 	write("soluçao atingiu o menor valor possivel!"),nl,
 	write('Geracao '), write(N), write(':'), nl, write([H|T]), nl,
     write('Melhor Solucao: '),write(H),nl,
+	linha_em_uso(L),
     assertz(linha_solucao(L,S)).
 
-gera_geracao(G,G,[S*V|T],L):-!,
+gera_geracao(G,G,[S*V|T]):-!,
 	H = S*V,
 	write('Geracao '), write(G), write(':'), nl, write([S*V|T]), nl,
     write('Melhor Solucao: '),write(H),nl,
+	linha_em_uso(L),
     assertz(linha_solucao(L,S)).
 
-gera_geracao(N,G,Pop,L):-
+gera_geracao(N,G,Pop):-
 	%write('Geracao '), write(N), write(':'), nl, write(Pop), nl,
 	gera_geracao_base(Pop,PopFinal),
 	N1 is N+1,
-	gera_geracao(N1,G,PopFinal,L).
+	gera_geracao(N1,G,PopFinal).
  
 nova_geracao(Pop1,Pop2,PopFinal):-
 	%Tamanho da população
