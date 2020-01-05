@@ -41,8 +41,8 @@ print_client_orders:-
 :- use_module(library(http/json_convert)).
 :- set_setting(http:cors, [*]).
 
-server:-http_server(http_dispatch, [port(5004)]).
-server_stop:-http_stop_server(5004,[]).
+server:-http_server(http_dispatch, [port(2226)]).
+server_stop:-http_stop_server(2226,[]).
 
 :- http_handler(root(api), handle_request, []).
 :- http_handler(root(api/productionplanning),createProductionPlanning,[]).
@@ -1083,7 +1083,7 @@ compare_list([L1Head|L1Tail], [L2Head|L2Tail]):-
 
 
 
-
+%%%%%%%%%%%%%%%%% SERVER END %%%%%%%%%%%%%%%%%%%%
 
 
 
