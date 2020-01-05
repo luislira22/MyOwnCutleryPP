@@ -63,6 +63,240 @@ encomendas_cliente(clB, [e(pC, 3, 30), e(pD, 5, 200), e(pA, 1, 198)]).
 %encomendas_cliente(clC, [e(pE, 4, 60), e(pD, 4, 60),e(pA, 4, 60)]).
 %encomendas_cliente(clD, [e(pA, 2, 180), e(pE, 3, 500), e(pD, 4, 700)]).
 
+
+%-------------------------------------Prints-------------------------------------%
+
+print_factory():-
+	write("Operacao maquina :"),nl,
+	findall((opt=Opt,maquina=M,ferramenta=F,setup=S,exec=E),
+			operacao_maquina(Opt,M,F,S,E),
+			LOM),write(LOM),nl,
+	write("linha maquinas :"),nl,
+	findall((linha=L,maquinas=LM),
+			linha_maquinas(L,LM),
+			LLM),write(LLM),nl.
+
+print_products():-
+	write("produtos operacoes :"),nl,
+	findall((produto=P,operacoes=LOP),
+			operacoes_produto(P,LOP),
+			LOPP),
+	write(LOPP),nl.
+
+%-------------------------------------HTTP Server-------------------------------------%
+
+:-dynamic id_operacaoTipo/2.
+:-dynamic id_produto/2.
+:-dynamic id_encomenda/5.
+
+
+:- use_module(library(http/thread_httpd)).
+:- use_module(library(http/http_dispatch)).
+:- use_module(library(http/http_open)).
+:- use_module(library(http/http_client)).
+:- use_module(library(http/json)).
+:- use_module(library(http/http_json)).
+:- use_module(library(http/http_cors)).
+:- use_module(library(http/json_convert)).
+:- set_setting(http:cors, [*]).
+
+server:-http_server(http_dispatch, [port(5004)]).
+server_stop:-http_stop_server(5004,[]).
+
+:- http_handler(root(api), handle_request, []).
+:- http_handler(root(api/productionplanning),createProductionPlanning,[]).
+:- http_handler(root(api/products/makespan),productsMakespan,[]).
+
+handle_request(_Request) :-
+    format("Content-type: text/plain~n~n"),
+    format("Hello!").
+
+productsMakespan(Request):-
+	(
+		(
+			(option(methods(options),Request),!,
+			cors_enable(Request, [methods([post,get,delete])]),
+			format("~n"))
+		)
+		;
+		(	
+			findall((product=P,makespan=M),(operacoes_produto(P,_),calcula_makespan(P,1,M)),LPM),
+			%order list
+			sort(2,@=<,LPM,LPMO),
+			%shorten list
+			shorten_List(LPMO,3,SHLPMO),
+			%list to json
+			list_to_json(SHLPMO,JSON_SHLPMO),
+			R = json([productsMakespan=JSON_SHLPMO]),
+			is_json_term(R),
+			format('Access-Control-Allow-Origin: *~n'),
+			format('Content-type: application/json~n'),
+			reply_json(R)
+		)
+	).
+
+
+list_to_json([],[]):-!.
+list_to_json([(product=P,makespan=M)|T],[NH|NT]):-
+	NH = json([product=P,makespan=M]),
+	list_to_json(T,NT).
+
+shorten_List(_,0,[]):-!.
+shorten_List([],_,[]):-!.
+shorten_List([H|T],Size,[H|T2]):-
+	NSize is Size - 1,
+	shorten_List(T,NSize,T2).
+
+
+createProductionPlanning(Request):-
+	(
+		(
+			(option(methods(options),Request),!,
+			cors_enable(Request, [methods([post,get,delete])]),
+			format("~n"))
+		)
+		;
+		(	
+			%read response
+			http_read_json(Request,JSON),
+            json_read(JSON,PROLOG_JSON),
+            %get start time
+	        get_time(StartTime),
+			%fetch everything
+			fetch_factory_overview(),
+			fetch_products_overview(),
+			%process clients and orders
+			process_clientsOrders_json(StartTime,PROLOG_JSON),
+			%start process
+			cria_op_enc(),
+			gera_production_planning(),
+			agenda_maquinas(),
+            build_json_response(StartTime,JSON_Response),
+            is_json_term(JSON_Response),
+            format('Access-Control-Allow-Origin: *~n'),
+			format('Content-type: application/json~n'),
+			reply_json(JSON_Response)
+		)
+	).
+
+
+
+build_json_response(StartTime,JSON_Response):-
+    findall(json([orderId=OrderId,endTime=EndTime]),
+            (tarefa_fim(TID,RelativeEndTime),
+            EndTime is StartTime + RelativeEndTime,
+            tarefa_encomenda(TID,EID),
+            encomenda(EID,Client,Prod,Qt,TConc),
+            id_encomenda(OrderId,Client,Prod,Qt,TConc)),
+            LE),JSON_Response=json([orderList=LE]).
+
+
+process_clientsOrders_json(json([orders=LE,clients=LC]),StartTime):-!,
+	%remove all old predicates
+	retractall(clientes_encomenda(_,_)),
+	retractall(clientes(prioridade_cliente(_,_))),
+	retractall(id_encomenda(_,_,_,_,_)),
+	process_orders_json(LE,1,StartTime),
+	process_clients_json(LC).
+
+process_orders_json([],_):-!.
+process_orders_json([json([orderId=OrderId,productId=ProductId,clientId=ClientId,quantity=Quantity,conclusionTime=ConclusionTime])|T],N,CurrentTime):-
+	%build relative time
+	RelativeConclusionTime is ConclusionTime - CurrentTime,
+	%build order id
+	id_produto(ProductId,P),
+	assertz(id_encomenda(OrderId,P,ClientId,Quantity,RelativeConclusionTime)),
+	(
+		(
+			encomendas_cliente(ClientId,LE),!,
+			append(LE,[e(P,Quantity,RelativeConclusionTime)],NLE),
+			retract(encomenda_cliente(ClientId,_)),
+			assertz(encomendas_cliente(ClientId,NLE))
+		)
+		;
+		(
+			assertz(encomendas_cliente(ClientId,[e(P,Quantity,RelativeConclusionTime)]))
+		)
+	),
+	N1 is N + 1,
+	process_orders_json(T,N1).
+
+process_clients_json([]):-!.
+process_clients_json([json([clientId=ClientId,priority=Priority])|T]):-
+	assertz(prioridade_cliente(ClientId,Priority)),
+	process_clients_json(T).
+
+
+:-dynamic linhas/1.
+:-dynamic linha_maquinas/2.
+:-dynamic operacao_maquina/5.
+
+%FACTORY OVERVIEW
+
+fetch_factory_overview:-
+	%retract all predicates related to old factory overview
+	retractall(linhas(_)),
+	retractall(linha_maquinas(_,_)),
+	retractall(operacao_maquina(_,_,_,_,_)),
+	%open connection to mdf overview
+	http_open("https://masterdatafactory.azurewebsites.net/",In,[cert_verify_hook(cert_accept_any)]),
+	json_read(In,FactoryOverviewJson),
+	process_factory_json(FactoryOverviewJson),close(In).
+
+process_factory_json(json([productionLines=LL,productionLineMachines=LLMJson,operationMachines=LOPTSJson])):-
+	%asserta lista de linhas
+	asserta(linhas(LL)),
+	process_productionLineMachines_json(LLMJson),
+	process_operationTypes_json(LOPTSJson,1).
+
+process_productionLineMachines_json([]):-!.
+process_productionLineMachines_json([json([productionLine=L,machines=LM])|T]):-
+	asserta(linha_maquinas(L,LM)),
+	process_productionLineMachines_json(T).
+
+process_operationTypes_json([],_):-!.
+process_operationTypes_json([json([operationType=OPTID,machine=M,tool=F,setupTime=TS,executionTime=TE])|T],N):-
+	%relate operation type
+	(
+		(id_operacaoTipo(OPTID,OPT),!,N1 is N)
+		;
+		(
+		atomic_concat("opt",N,OPT),
+		assertz(id_operacaoTipo(OPTID,OPT)),
+		N1 is N + 1
+		)
+	),
+	assertz(operacao_maquina(OPT,M,F,TS,TE)),
+	process_operationTypes_json(T,N1).
+
+%PRODUCTS OVERVIEW
+
+:-dynamic id_product/2.
+
+fetch_products_overview:-
+	%retract all predicates related to old products overview
+	retractall(operacao_produto(_,_)),
+	%open connection to mdf overview
+	http_open("https://masterdataproduct.azurewebsites.net/",In,[cert_verify_hook(cert_accept_any)]),
+	json_read(In,ProductsOverviewJson),
+	process_products_json(ProductsOverviewJson),close(In).
+
+process_products_json(json([productOperations=LPOPT])):-
+	process_productOperations_json(LPOPT,1).
+
+process_productOperations_json([json([product=PID,operations=LOPPID])|T],N):-
+	atomic_concat("p",N,P),
+	assertz(id_produto(PID,P)),
+	N1 is N + 1,
+	idList_to_operationTypeList(LOPPID,LOPP),
+	assertz(operacoes_produto(P,LOPP)),
+	process_productOperations_json(T,N1).
+
+idList_to_operationTypeList([],[]):-!.
+idList_to_operationTypeList([Id|T],[OPT|T2]):-
+	idList_to_operationTypeList(T,T2),
+	id_operacaoTipo(Id,OPT).
+
 %-------------------------------------Cria_op_enc-------------------------------------%
 :- (dynamic op_prod_client/6).
 :- (dynamic encomendas/1).
@@ -86,10 +320,8 @@ assertz(linhas_em_uso([])),
         %cria tarefas e ligaçoes entre as mesmas
         cria_tarefas_encomendas(LT,0),
         %atribui tarefas a linhas
-        inicializa_linhas(),write("linhas inicializadas!"),nl,
+        inicializa_linhas(),
 		balanceamento_linhas(),
-		%escreve atribuicoes de tarefas
-		findall((L,LTL),linha_tarefas(L,LTL),LLT),write(LLT),nl,
         %cria operaçoes atribuindo cada uma das tarefas á linha correspondente
 		findall(EID,encomenda(EID,_,_,_,_),LE),
 		cria_ops(LE,0).
@@ -125,7 +357,6 @@ cria_ops_prod_cliente2(Opt,EID,N,Ni):-
             %Maquina tem de estar na linha
             operacao_maquina(Opt,M,F,Tsetup,Texec),
             member(M,LM),!,
-			write(Op),write(" ---> "),write(M),write(","),write(F),write(","),write(EID),write(",S"),write(Tsetup),write(",E"),write(Texec),nl,
 	assertz(op_prod_client(Op,M,F,EID,Tsetup,Texec)).
 
 
@@ -194,25 +425,8 @@ agenda_maquinas:-
 	retractall(machine_tool(_,_)),
 	retractall(tarefa_fim(_,_)),
 	asserta(deslizamento_total(0)),
-	findall(T,(linha_solucao(_,T),agenda_maquinas_tarefas(0,T)),_),
-	escreve_agendamentos().
+	findall(T,(linha_solucao(_,T),agenda_maquinas_tarefas(0,T)),_).
 
-escreve_agendamentos:-
-	findall((L,LM),(linha_maquinas(L,LM),write("linha "), write(L),nl,nl,escreve_agendamentos_maquinas(LM)),_).
-
-escreve_agendamentos_maquinas([]):-!.
-escreve_agendamentos_maquinas([M|T]):-
-	agenda_maquina(M,LA),write(M),write(": "),nl,escreve_agendamentos_maquina(LA),
-	escreve_agendamentos_maquinas(T).
-
-escreve_agendamentos_maquina([]):-!.
-escreve_agendamentos_maquina([a(TIS,TFS,"setup",F),a(TIE,TFE,"exec",Op)|T]):-!,
-	write("setup("),write(TIS),write(" ---> "),write(TFS),write(" with "),write(F),write(") ... "),
-	write("execution("),write(TIE),write("---> "),write(TFE),write(" in "),write(Op),write(")"),nl,
-	escreve_agendamentos_maquina(T).
-escreve_agendamentos_maquina([a(TIE,TFE,"exec",Op)|T]):- 
-	write("execution("),write(TIE),write(" ---> "),write(TFE),write(" in "),write(Op),write(")"),nl,
-	escreve_agendamentos_maquina(T).
 
 agenda_maquinas_tarefas(_,[]):-!.
 agenda_maquinas_tarefas(TempoActual,[TID|T]):-
@@ -237,7 +451,6 @@ agenda_maquinas_tarefas(TempoActual,[TID|T]):-
 	%calcula valor final da tarefa
 	FimTarefa is NTempoActual - DM,
 	assertz(tarefa_fim(TID,FimTarefa)),
-	write(TID),write(": "),write(FimTarefa),write("<---"),write(DM),write("---| "),write(NTempoActual),nl,
 	agenda_maquinas_tarefas(NTempoActual,T).
 
 junta_listas([],[]):-!.
@@ -400,7 +613,6 @@ cria_tarefa_encomenda(t(Cliente,Prod,Qt,TConc),N):-
     atomic_concat('t',N,NTarefa),
     atomic_concat('e',N,NEncomenda),
     prioridade_cliente(Cliente,Prioridade),calcula_penalizacao(Prioridade,Penalizacao),
-	write(NTarefa),write(' --> '),write(Cliente),write(', '),write(Prod),write(', Quantidade  -> '),write(Qt),write(', Penalizacao -> '),write(Penalizacao),write(', Tempo de Conlusao -> '),write(TConc),write(', ['),write(MakeSpan),write(']'),nl,
     assertz(tarefa(NTarefa,MakeSpan,TConc,Penalizacao)),
     assertz(encomenda(NEncomenda,Cliente,Prod,Qt,TConc)),
     assertz(tarefa_encomenda(NTarefa,NEncomenda)).
@@ -518,21 +730,21 @@ gera_production_planning:-
 retractall(linha_solucao(_,_)),
 findall((L,LT),linha_tarefas(L,LT),LLT),!,
 setup_gera(),
-gera_production_planning(LLT),!,
-findall(linha_solucao(L,SOL),linha_solucao(L,SOL),LLS),
-write(LLS).
+gera_production_planning(LLT),!.
+
+
 
 
 gera_production_planning([]):- !.
 
 gera_production_planning([(L,LT)|T]):-
-	write('linha='),write(L),nl,
+
 	((retract(linha_em_uso(_)),!);true), asserta(linha_em_uso(L)),
 	((retract(tarefas_linha_em_uso(_)),!);true),length(LT,NT),asserta(tarefas_linha_em_uso(NT)),
 	(
-		(NT >= 6,!,write("Algoritmo genetico"),nl,gera())
+		(NT >= 6,!,gera())
 		;
-		(write("Melhor escalonamento"),nl,melhor_escalonamento())
+		(melhor_escalonamento())
 	),gera_production_planning(T).
 
 %-------------------------------------Melhor Escalonamento-------------------------------------%
@@ -553,7 +765,6 @@ linha_em_uso(L),linha_tarefas(L,LT1),findall(T,(tarefa(T,_,_,_),member(T,LT1)),L
 permuta(LT,LP),avalia(LP,NTempo),
 melhor_tempo(Tempo),
 NTempo<Tempo,
-write(LP),write("*"),write(NTempo),nl,
 retract(melhor_tempo(_)),asserta(melhor_tempo(NTempo)),
 retractall(linha_solucao(L,_)),asserta(linha_solucao(L,LP)).
 
@@ -563,8 +774,6 @@ retractall(linha_solucao(L,_)),asserta(linha_solucao(L,LP)).
 melhor_escalonamento():-
 				assertz(melhor_tempo(100000000)),
 				findall(_,permuta_tempo(_,_),_),
-				linha_em_uso(L),linha_solucao(L,LT),melhor_tempo(Tempo),
-				write("Melhor Solucao: "),write(LT),write("*"),write(Tempo),nl,
 				retractall(melhor_tempo(_)).
 			
 
@@ -586,9 +795,7 @@ setup_gera:-
 
 gera():-
 	gera_populacao(Pop),!,
-	write('Pop='),write(Pop),nl,
 	avalia_populacao(Pop,PopAv),
-	write('PopAv='),write(PopAv),nl,
 	ordena_populacao(PopAv,PopOrd),
 	geracoes(NG),
 	gera_geracao(0,NG,PopOrd).
@@ -685,23 +892,15 @@ gera_geracao_base(Pop,PopFinal):-
 	ordena_populacao(NPopAv,NPopOrd),
 	nova_geracao(Pop,NPopOrd,PopFinal).
 
-gera_geracao(N,_,[S*0|T]):-!,
-	H = S*0,
-	write("soluçao atingiu o menor valor possivel!"),nl,
-	write('Geracao '), write(N), write(':'), nl, write([H|T]), nl,
-    write('Melhor Solucao: '),write(H),nl,
+gera_geracao(_,_,[S*0|_]):-!,
 	linha_em_uso(L),
     assertz(linha_solucao(L,S)).
 
-gera_geracao(G,G,[S*V|T]):-!,
-	H = S*V,
-	write('Geracao '), write(G), write(':'), nl, write([S*V|T]), nl,
-    write('Melhor Solucao: '),write(H),nl,
+gera_geracao(G,G,[S*_|_]):-!,
 	linha_em_uso(L),
     assertz(linha_solucao(L,S)).
 
 gera_geracao(N,G,Pop):-
-	%write('Geracao '), write(N), write(':'), nl, write(Pop), nl,
 	gera_geracao_base(Pop,PopFinal),
 	N1 is N+1,
 	gera_geracao(N1,G,PopFinal).
