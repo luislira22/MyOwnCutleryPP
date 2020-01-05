@@ -60,8 +60,8 @@ prioridade_cliente(clD, 4).
 % termos e(<produto>,<n.unidades>,<tempo_conclusao>)
 encomendas_cliente(clA, [e(pA, 4, 50), e(pB, 4, 70), e(pD, 6, 100)]).
 encomendas_cliente(clB, [e(pC, 3, 30), e(pD, 5, 200), e(pA, 1, 198)]).
-%encomendas_cliente(clC, [e(pE, 4, 60), e(pD, 4, 60),e(pA, 4, 60)]).
-%encomendas_cliente(clD, [e(pA, 2, 180), e(pE, 3, 500), e(pD, 4, 700)]).
+encomendas_cliente(clC, [e(pE, 4, 60), e(pD, 4, 60),e(pA, 4, 60)]).
+encomendas_cliente(clD, [e(pA, 2, 180), e(pE, 3, 500), e(pD, 4, 700)]).
 
 %-------------------------------------Cria_op_enc-------------------------------------%
 :- (dynamic op_prod_client/6).

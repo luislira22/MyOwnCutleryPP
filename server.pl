@@ -1,69 +1,3 @@
-% FABRICA
-
-% Linhas
-linhas([lA, lB]).
-
-
-% Maquinas que constituem as Linhas
-linha_maquinas(lA, [ma, mb, mc, md, me]).
-linha_maquinas(lB, [mf, mg, mh, mi, mj]).
-
-
-% Operacoes
-
-% Afetacao de tipos de operacoes a tipos de maquinas
-% com ferramentas, tempos de setup e tempos de execucao)
-operacao_maquina(opt1, ma, fa, 1, 1).
-operacao_maquina(opt1, mf, fa, 1, 1).
-operacao_maquina(opt2, mb, fb, 2.5, 2).
-operacao_maquina(opt2, mg, fb, 2.5, 2).
-operacao_maquina(opt3, mc, fc, 1, 3).
-operacao_maquina(opt3, mh, fc, 1, 3).
-operacao_maquina(opt4, md, fd, 1, 1).
-operacao_maquina(opt4, mi, fd, 1, 1).
-operacao_maquina(opt5, me, fe, 2, 3).
-operacao_maquina(opt5, mj, fe, 2, 3).
-operacao_maquina(opt6, mb, ff, 1, 4).
-operacao_maquina(opt6, mg, ff, 1, 4).
-operacao_maquina(opt7, md, fg, 2, 5).
-operacao_maquina(opt7, mi, fg, 2, 5).
-operacao_maquina(opt8, ma, fh, 1, 6).
-operacao_maquina(opt8, mf, fh, 1, 6).
-operacao_maquina(opt9, me, fi, 1, 7).
-operacao_maquina(opt9, mj, fi, 1, 7).
-operacao_maquina(opt10, mc, fj, 20, 2).
-
-
-% PRODUTOS
-
-operacoes_produto(pA, [opt1, opt2, opt3, opt4, opt5]).
-operacoes_produto(pB, [opt1, opt6, opt3, opt4, opt5]).
-operacoes_produto(pC, [opt1, opt2, opt3, opt7, opt5]).
-operacoes_produto(pD, [opt8, opt2, opt3, opt4, opt5]).
-operacoes_produto(pE, [opt1, opt2, opt3, opt4, opt9]).
-operacoes_produto(pF, [opt1, opt2, opt10, opt4, opt5]).
-
-
-% ENCOMENDAS
-
-
-%quanto maior a o valor maior a prioridade
-% prioridades dos clientes
-prioridade_cliente(clA, 3).
-prioridade_cliente(clB, 1).
-prioridade_cliente(clC, 2).
-prioridade_cliente(clD, 4).
-
-
-
-% Encomendas do cliente, 
-% termos e(<produto>,<n.unidades>,<tempo_conclusao>)
-encomendas_cliente(clA, [e(pA, 4, 50), e(pB, 4, 70), e(pD, 6, 100)]).
-encomendas_cliente(clB, [e(pC, 3, 30), e(pD, 5, 200), e(pA, 1, 198)]).
-%encomendas_cliente(clC, [e(pE, 4, 60), e(pD, 4, 60),e(pA, 4, 60)]).
-%encomendas_cliente(clD, [e(pA, 2, 180), e(pE, 3, 500), e(pD, 4, 700)]).
-
-
 %-------------------------------------Prints-------------------------------------%
 
 print_factory():-
@@ -220,16 +154,16 @@ process_orders_json([json([orderId=OrderId,productId=ProductId,clientId=ClientId
 	RelativeConclusionTime is ConclusionTime - CurrentTime,
 	%build order id
 	id_produto(ProductId,P),
-	assertz(id_encomenda(OrderId,P,ClientId,Quantity,RelativeConclusionTime)),
+	assertz(id_encomenda(OrderId,ClientId,P,Quantity,RelativeConclusionTime)),
 	(
 		(
 			encomendas_cliente(ClientId,LE),!,
 			append(LE,[e(P,Quantity,RelativeConclusionTime)],NLE),
-			retract(encomenda_cliente(ClientId,_)),
+			retract(encomendas_cliente(ClientId,_)),
 			assertz(encomendas_cliente(ClientId,NLE))
 		)
 		;
-		(
+		(	
 			assertz(encomendas_cliente(ClientId,[e(P,Quantity,RelativeConclusionTime)]))
 		)
 	),
