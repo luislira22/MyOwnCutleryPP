@@ -83,6 +83,13 @@ print_products():-
 			LOPP),
 	write(LOPP),nl.
 
+print_client_orders:-
+	write("client orders :"),nl,
+	findall((cliente=Client,orders=Orders),
+			encomendas_cliente(Client,Orders),
+			LCO),
+	write(LCO),nl.
+
 %-------------------------------------HTTP Server-------------------------------------%
 
 :-dynamic id_operacaoTipo/2.
@@ -120,7 +127,11 @@ productsMakespan(Request):-
 		)
 		;
 		(	
-			findall((product=P,makespan=M),(operacoes_produto(P,_),calcula_makespan(P,1,M)),LPM),
+			%fetch factory overview
+			fetch_factory_overview(),
+			%fetch products overview
+			fetch_products_overview(),
+			findall((productId=PID,makespan=M),(operacoes_produto(P,_),calcula_makespan(P,1,M),id_produto(PID,P)),LPM),
 			%order list
 			sort(2,@=<,LPM,LPMO),
 			%shorten list
@@ -135,10 +146,9 @@ productsMakespan(Request):-
 		)
 	).
 
-
 list_to_json([],[]):-!.
-list_to_json([(product=P,makespan=M)|T],[NH|NT]):-
-	NH = json([product=P,makespan=M]),
+list_to_json([(productId=P,makespan=M)|T],[NH|NT]):-
+	NH = json([productId=P,makespan=M]),
 	list_to_json(T,NT).
 
 shorten_List(_,0,[]):-!.
@@ -158,22 +168,21 @@ createProductionPlanning(Request):-
 		;
 		(	
 			%read response
-			http_read_json(Request,JSON),
-            json_read(JSON,PROLOG_JSON),
-            %get start time
-	        get_time(StartTime),
+			http_read_json(Request,PROLOG),
+   			%get start time
+			get_time(StartTime),
 			%fetch everything
 			fetch_factory_overview(),
 			fetch_products_overview(),
 			%process clients and orders
-			process_clientsOrders_json(StartTime,PROLOG_JSON),
+			process_clientsOrders_json(PROLOG,StartTime),
 			%start process
 			cria_op_enc(),
 			gera_production_planning(),
 			agenda_maquinas(),
-            build_json_response(StartTime,JSON_Response),
-            is_json_term(JSON_Response),
-            format('Access-Control-Allow-Origin: *~n'),
+			build_json_response(StartTime,JSON_Response),
+			is_json_term(JSON_Response),
+			format('Access-Control-Allow-Origin: *~n'),
 			format('Content-type: application/json~n'),
 			reply_json(JSON_Response)
 		)
@@ -181,25 +190,31 @@ createProductionPlanning(Request):-
 
 
 
+
 build_json_response(StartTime,JSON_Response):-
     findall(json([orderId=OrderId,endTime=EndTime]),
-            (tarefa_fim(TID,RelativeEndTime),
-            EndTime is StartTime + RelativeEndTime,
-            tarefa_encomenda(TID,EID),
-            encomenda(EID,Client,Prod,Qt,TConc),
-            id_encomenda(OrderId,Client,Prod,Qt,TConc)),
+			(
+				tarefa_fim(TID,RelativeEndTime),
+				id_encomenda(OrderId,Client,Prod,Qt,TConc),
+				tarefa_encomenda(TID,EID),
+				encomenda(EID,Client,Prod,Qt,TConc),
+				EndTime is StartTime + RelativeEndTime
+			),
             LE),JSON_Response=json([orderList=LE]).
 
 
-process_clientsOrders_json(json([orders=LE,clients=LC]),StartTime):-!,
+:-dynamic encomendas_cliente/2.
+:-dynamic prioridade_cliente/2.
+
+process_clientsOrders_json(json([orders=LE,clients=LC]),StartTime):-
 	%remove all old predicates
-	retractall(clientes_encomenda(_,_)),
-	retractall(clientes(prioridade_cliente(_,_))),
+	retractall(encomendas_cliente(_,_)),
+	retractall(prioridade_cliente(_,_)),
 	retractall(id_encomenda(_,_,_,_,_)),
-	process_orders_json(LE,1,StartTime),
+	process_orders_json(LE,1,StartTime),!,
 	process_clients_json(LC).
 
-process_orders_json([],_):-!.
+process_orders_json([],_,_):-!.
 process_orders_json([json([orderId=OrderId,productId=ProductId,clientId=ClientId,quantity=Quantity,conclusionTime=ConclusionTime])|T],N,CurrentTime):-
 	%build relative time
 	RelativeConclusionTime is ConclusionTime - CurrentTime,
@@ -219,7 +234,7 @@ process_orders_json([json([orderId=OrderId,productId=ProductId,clientId=ClientId
 		)
 	),
 	N1 is N + 1,
-	process_orders_json(T,N1).
+	process_orders_json(T,N1,CurrentTime).
 
 process_clients_json([]):-!.
 process_clients_json([json([clientId=ClientId,priority=Priority])|T]):-
@@ -239,7 +254,7 @@ fetch_factory_overview:-
 	retractall(linha_maquinas(_,_)),
 	retractall(operacao_maquina(_,_,_,_,_)),
 	%open connection to mdf overview
-	http_open("https://masterdatafactory.azurewebsites.net/",In,[cert_verify_hook(cert_accept_any)]),
+	http_open("https://masterdatafactory.azurewebsites.net/api/factoryoverview",In,[cert_verify_hook(cert_accept_any)]),
 	json_read(In,FactoryOverviewJson),
 	process_factory_json(FactoryOverviewJson),close(In).
 
@@ -271,19 +286,22 @@ process_operationTypes_json([json([operationType=OPTID,machine=M,tool=F,setupTim
 
 %PRODUCTS OVERVIEW
 
-:-dynamic id_product/2.
+:- dynamic operacoes_produto/2.
+
 
 fetch_products_overview:-
 	%retract all predicates related to old products overview
-	retractall(operacao_produto(_,_)),
+	retractall(operacoes_produto(_,_)),
+	retractall(id_produto(_,_)),
 	%open connection to mdf overview
-	http_open("https://masterdataproduct.azurewebsites.net/",In,[cert_verify_hook(cert_accept_any)]),
+	http_open("https://masterdataproduct.azurewebsites.net/api/productsoverview",In,[cert_verify_hook(cert_accept_any)]),
 	json_read(In,ProductsOverviewJson),
 	process_products_json(ProductsOverviewJson),close(In).
 
 process_products_json(json([productOperations=LPOPT])):-
 	process_productOperations_json(LPOPT,1).
 
+process_productOperations_json([],_):-!.
 process_productOperations_json([json([product=PID,operations=LOPPID])|T],N):-
 	atomic_concat("p",N,P),
 	assertz(id_produto(PID,P)),
